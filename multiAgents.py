@@ -29,32 +29,47 @@ def scoreEvaluationFunction(currentGameState: GameState):
     return currentGameState.getScore()
 
 
-def betterEvaluationFunction(currentGameState: GameState):
-    """
-    Your extreme ghost-hunting, pellet-nabbing, food-gobbling, unstoppable
-    evaluation function (question 5).
+def betterEvaluationFunction(game_state: GameState):
 
-    DESCRIPTION: <write something here so we know what you did>
-    """
+    WIN_FACTOR = 5000
+    LOST_FACTOR = -50000
+    FOOD_COUNT_FACTOR = 1_000_000
+    FOOD_DISTANCE_FACTOR = 1_000
+    CAPSULES_FACTOR = 10_000
 
-    pos = currentGameState.getPacmanPosition()
-    food = currentGameState.getFood()
-    ghostStates = currentGameState.getGhostStates()
+    food_distance = distance_to_nearest(
+        game_state, game_state.getFood().asList())
+    ghost_distance = distance_to_nearest(
+        game_state, game_state.getGhostPositions())
+    food_count = game_state.getNumFood()
+    capsules_count = len(game_state.getCapsules())
 
-    foodDist = [util.manhattanDistance(pos, f) for f in food.asList()]
-    ghostDist = [util.manhattanDistance(
-        pos, g.getPosition()) for g in ghostStates]
+    food_count_value = 1 / (food_count + 1) * FOOD_COUNT_FACTOR
+    ghost_value = ghost_distance
+    food_distance_value = 1 / food_distance * FOOD_DISTANCE_FACTOR
+    capsules_count_value = 1 / (capsules_count + 1) * CAPSULES_FACTOR
+    end_value = 0
 
-    if len(foodDist) == 0:
-        return 0
-    if min(ghostDist) < 2:
-        return -inf
+    if game_state.isLose():
+        end_value += LOST_FACTOR
+    elif game_state.isWin():
+        end_value += WIN_FACTOR
 
-    return currentGameState.getScore() - min(foodDist) - min(ghostDist)
+    return food_count_value + ghost_value + food_distance_value + \
+        capsules_count_value + end_value
+
+
+def distance_to_nearest(game_state, positions):
+    if len(positions) == 0:
+        return inf
+    pacman_pos = game_state.getPacmanPosition()
+    distances = [util.manhattanDistance(pacman_pos, position)
+                 for position in positions]
+    return min(distances)
 
 
 class MultiAgentSearchAgent(Agent):
-    def __init__(self, evalFn="scoreEvaluationFunction", depth="2",
+    def __init__(self, evalFn="betterEvaluationFunction", depth="2",
                  time_limit="6"):
         self.index = 0  # Pacman is always agent index 0
         self.evaluationFunction = util.lookup(evalFn, globals())
@@ -85,34 +100,55 @@ class AIAgent(MultiAgentSearchAgent):
         Returns whether or not the game state is a losing state
         """
 
-        def alphaBeta(state, depth, alpha, beta, agent):
-            isMax = agent == 0
-            nextDepth = depth-1 if isMax else depth
-            if nextDepth == 0 or state.isWin() or state.isLose():
-                return self.evaluationFunction(state), None
-
-            nextAgent = (agent + 1) % state.getNumAgents()
-            bestVal = -inf if isMax else inf
-            bestAction = None
-            bestOf = max if isMax else min
-
-            for action in state.getLegalActions(agent):
-                successorState = state.generateSuccessor(agent, action)
-                valOfAction, _ = alphaBeta(
-                    successorState, nextDepth, alpha, beta, nextAgent)
-                if bestOf(bestVal, valOfAction) == valOfAction:
-                    bestVal, bestAction = valOfAction, action
-
-                if isMax:
-                    if bestVal > beta:
-                        return bestVal, bestAction
-                    alpha = max(alpha, bestVal)
-                else:
-                    if bestVal < alpha:
-                        return bestVal, bestAction
-                    beta = min(beta, bestVal)
-
-            return bestVal, bestAction
-
-        _, action = alphaBeta(gameState, self.depth+1, -inf, inf, self.index)
+        action, _ = self.min_max_value(
+            game_state=gameState,
+            agent_index=0,
+            alpha=-inf,
+            beta=inf,
+            depth=0
+        )
         return action
+
+    def min_max_value(self, game_state: GameState, agent_index,
+                      alpha, beta, depth):
+        if game_state.isWin() or game_state.isLose() or depth >= \
+                self.depth * game_state.getNumAgents():
+            return 'Stop', self.evaluationFunction(game_state)
+        elif agent_index == 0:
+            return self.max_value(game_state, 0, alpha, beta, depth)
+        else:
+            return self.min_value(game_state, agent_index, alpha, beta, depth)
+
+    def max_value(self, game_state: GameState, agent_index, alpha,
+                  beta, depth):
+        best_value = -inf
+        best_action = 'Stop'
+        next_agent_index = (agent_index + 1) % game_state.getNumAgents()
+
+        for next_action in game_state.getLegalActions(agent_index):
+            next_state = game_state.generateSuccessor(agent_index, next_action)
+            next_value = self.min_max_value(
+                next_state, next_agent_index, alpha, beta, depth + 1)[1]
+            if next_value > best_value:
+                best_action, best_value = next_action, next_value
+            if best_value > beta:
+                return best_action, best_value
+            alpha = max(alpha, best_value)
+        return best_action, best_value
+
+    def min_value(self, game_state: GameState, agent_index, alpha,
+                  beta, depth):
+        best_value = inf
+        best_action = 'Stop'
+        next_agent_index = (agent_index + 1) % game_state.getNumAgents()
+
+        for next_action in game_state.getLegalActions(agent_index):
+            next_state = game_state.generateSuccessor(agent_index, next_action)
+            next_value = self.min_max_value(
+                next_state, next_agent_index, alpha, beta, depth + 1)[1]
+            if next_value < best_value:
+                best_action, best_value = next_action, next_value
+            if best_value < alpha:
+                return best_action, best_value
+            beta = min(beta, best_value)
+        return best_action, best_value
